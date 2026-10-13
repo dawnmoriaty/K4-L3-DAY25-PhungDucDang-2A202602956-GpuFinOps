@@ -1,5 +1,8 @@
 """M3 — Purchasing Strategy: break-even, tier choice, spot-checkpoint sim (deck §4).
 
+Extended with:
+  - Extension 1: Eviction-aware purchasing policy matrix considering GPU eviction rates & horizons.
+
 Run: python missions/m3_purchasing.py
 """
 from __future__ import annotations
@@ -50,6 +53,18 @@ def run(verbose: bool = True) -> dict:
         for r in recs:
             print(f"{r['job_id']:18}{r['gpu_type']:7}{r['tier']:11}${r['on_demand']:>11,}${r['optimized']:>11,}")
         print(f"\nmonthly: on-demand ${on_demand_monthly:,.0f} -> optimized ${optimized_monthly:,.0f}  ({savings_pct:.1f}% saved)")
+
+        print("\n--- Extension 1: Eviction-Aware Purchasing Policy Matrix ---")
+        print(f"{'job':18}{'gpu':7}{'evict%':8}{'days':6}{'tier':12}{'policy rationale'}")
+        for j in jobs:
+            gt = j["gpu_type"]
+            hpd_val = num(j["hours_per_day"])
+            int_val = bool(int(num(j["interruptible"])))
+            days_val = int(num(j.get("days", 30)))
+            evict = pricing.GPU_INTERRUPT_RATES.get(gt, 0.05)
+            t = pricing.recommend_tier(hpd_val, int_val, gpu_type=gt, job_days=days_val)
+            rat = "Spot: eviction risk < 10% & checkpointable" if t == "spot" else "Reserved: steady 24/7 load > 55% break-even"
+            print(f"{j['job_id']:18}{gt:7}{evict:<8.0%}{days_val:<6}{t:12}{rat}")
 
     return {"recommendations": recs, "on_demand_monthly": round(on_demand_monthly),
             "optimized_monthly": round(optimized_monthly), "savings_pct": round(savings_pct, 1)}
