@@ -60,21 +60,52 @@ def break_even_utilization(discount_frac: float) -> float:
     return max(0.0, min(1.0, 1.0 - discount_frac))
 
 
-def recommend_tier(hours_per_day: float, interruptible: bool, reserved_discount: float = 0.45) -> str:
-    """Pick a purchasing tier from a workload's duty cycle + interruptibility.
+def recommend_tier(
+    hours_per_day: float,
+    interruptible: bool,
+    reserved_discount: float = 0.45,
+    gpu_type: str | None = None,
+    job_days: float | None = None,
+) -> str:
+    """Pick a purchasing tier from a workload's duty cycle, interruptibility, duration, and GPU type.
 
-    DOCUMENTED simple policy (instructor extension point — swap in your own):
+    Extension 1 policy:
       - interruptible & not 24/7  -> 'spot'      (checkpoint and ride the discount)
-      - duty cycle >= break-even  -> 'reserved'  (steady, high utilization)
+      - if job_days is specified and job_days < 30: short-term workload should NOT commit to 3-year reserved.
+      - duty cycle >= break-even  -> 'reserved'  (steady, long-term high utilization)
       - otherwise                 -> 'on_demand' (spiky / low duty)
     """
     duty = max(0.0, hours_per_day) / 24.0
     be = break_even_utilization(reserved_discount)
     if interruptible and hours_per_day < 24:
         return "spot"
+    if job_days is not None and job_days < 30:
+        # Avoid long-term reserved commitment lock-in for temporary short projects
+        return "on_demand"
     if duty >= be:
         return "reserved"
     return "on_demand"
+
+
+def cache_is_worth_it(
+    avg_cache_reads: float,
+    write_cost_per_m: float,
+    read_discount: float = 0.10,
+    read_price_per_m: float = 3.00,
+) -> bool:
+    """Determine if prompt caching produces net economic savings.
+
+    Extension 3 policy:
+      Without cache: N * read_price_per_m
+      With cache: write_cost_per_m + N * read_price_per_m * read_discount
+      Break-even reads N* = write_cost_per_m / (read_price_per_m * (1 - read_discount))
+    """
+    savings_per_read = read_price_per_m * (1.0 - read_discount)
+    if savings_per_read <= 0:
+        return False
+    breakeven_reads = write_cost_per_m / savings_per_read
+    return avg_cache_reads > breakeven_reads
+
 
 
 def spot_checkpoint_cost(
